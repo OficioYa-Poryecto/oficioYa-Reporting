@@ -44,6 +44,7 @@ import edu.eci.dosw.oficioya.reporting.dto.EstadisticasReputacionDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasServiciosDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasTrabajadoresDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasUsuariosDTO;
+import edu.eci.dosw.oficioya.reporting.exception.IntegracionException;
 import edu.eci.dosw.oficioya.reporting.service.exportacion.ExportadorCsv;
 import edu.eci.dosw.oficioya.reporting.service.exportacion.ExportadorFactory;
 
@@ -130,6 +131,48 @@ class ReporteServiceTest {
         assertThat(estadisticas).hasSize(TipoEstadistica.values().length);
         // listas nulas de los otros dominios se tratan como vacías
         assertThat(estadisticas.get(3).puntos()).isEmpty();
+    }
+
+    @Test
+    void siUnDominioNoRespondeElReporteSaleConLosDemasYLoIndica() {
+        when(orquestador.estadisticasTrabajadores()).thenThrow(new IntegracionException("Worker caído", null));
+
+        Reporte reporte = servicio.generar(TipoReporte.GENERAL, SEMANA, "admin-1");
+
+        assertThat(reporte.fuentesSinDatos()).containsExactly(ReporteService.FUENTE_WORKER);
+        assertThat(reporte.indicadores()).filteredOn(i -> i.tipo() == TipoIndicador.SERVICIOS_CUMPLIDOS)
+                .singleElement().satisfies(i -> assertThat(i.valor()).isEqualTo(1248));
+        assertThat(reporte.indicadores()).filteredOn(i -> i.tipo() == TipoIndicador.TRABAJADORES_ACTIVOS)
+                .singleElement().satisfies(i -> assertThat(i.valor()).isZero());
+        assertThat(servicio.estadisticas(SEMANA, "admin-1")).hasSize(TipoEstadistica.values().length);
+    }
+
+    @Test
+    void cadaDominioSinDatosSeAnotaUnaSolaVez() {
+        when(orquestador.estadisticasServicios(any())).thenThrow(new IntegracionException("Service caído", null));
+        when(orquestador.estadisticasUsuarios(any())).thenThrow(new IntegracionException("Users caído", null));
+
+        Reporte reporte = servicio.generar(TipoReporte.GENERAL, SEMANA, "admin-1");
+
+        assertThat(reporte.fuentesSinDatos()).containsExactly(ReporteService.FUENTE_SERVICE, ReporteService.FUENTE_USERS);
+    }
+
+    @Test
+    void siNingunDominioRespondeEsUnaFallaDeIntegracion() {
+        IntegracionException caido = new IntegracionException("caído", null);
+        when(orquestador.estadisticasServicios(any())).thenThrow(caido);
+        when(orquestador.estadisticasTrabajadores()).thenThrow(caido);
+        when(orquestador.estadisticasReputacion(any())).thenThrow(caido);
+        when(orquestador.estadisticasUsuarios(any())).thenThrow(caido);
+
+        assertThatThrownBy(() -> servicio.generar(TipoReporte.GENERAL, SEMANA, "admin-1"))
+                .isInstanceOf(IntegracionException.class);
+        assertThatThrownBy(() -> servicio.estadisticas(SEMANA, "admin-1")).isInstanceOf(IntegracionException.class);
+    }
+
+    @Test
+    void conTodosLosDominiosNoHayFuentesSinDatos() {
+        assertThat(servicio.generar(TipoReporte.GENERAL, SEMANA, "admin-1").fuentesSinDatos()).isEmpty();
     }
 
     @Test

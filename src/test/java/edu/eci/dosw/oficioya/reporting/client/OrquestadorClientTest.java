@@ -23,6 +23,7 @@ import edu.eci.dosw.oficioya.reporting.domain.PeriodoConsulta;
 import edu.eci.dosw.oficioya.reporting.dto.ConteoDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasServiciosDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasTrabajadoresDTO;
+import edu.eci.dosw.oficioya.reporting.dto.EstadisticasUsuariosDTO;
 import edu.eci.dosw.oficioya.reporting.exception.IntegracionException;
 
 class OrquestadorClientTest {
@@ -41,8 +42,8 @@ class OrquestadorClientTest {
         RestClient.Builder builder = RestClient.builder();
         servidor = MockRestServiceServer.bindTo(builder).build();
         cliente = new OrquestadorRestClient(builder, BASE, "/api/v1/services/reports",
-                "/api/workers/trabajadores/estadisticas", "/api/v1/reputation/estadisticas",
-                "/api/users/usuarios/estadisticas");
+                "/api/v1/workers/stats", "/api/v1/reputation/estadisticas",
+                "/api/v1/users/stats/accounts");
     }
 
     @AfterEach
@@ -51,7 +52,7 @@ class OrquestadorClientTest {
     }
 
     @Test
-    void consultaLosTresDominiosPorElOrquestadorReenviandoElJwt() {
+    void consultaLosCuatroDominiosPorElOrquestadorReenviandoElJwt() {
         Jwt jwt = Jwt.withTokenValue("token-admin").header("alg", "HS256").subject("admin-1").build();
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
 
@@ -61,18 +62,19 @@ class OrquestadorClientTest {
                         {"total": 1300, "byStatus": {"COMPLETED": 1248, "PENDING": 52},
                          "byNeighborhood": {"Chapinero": 700}, "byHour": {"9": 1000, "19": 300}}""",
                         MediaType.APPLICATION_JSON));
-        servidor.expect(requestTo(BASE + "/api/workers/trabajadores/estadisticas"))
+        servidor.expect(requestTo(BASE + "/api/v1/workers/stats"))
                 .andRespond(withSuccess("{\"activos\": 400, \"pausadosVoluntarios\": 12, \"pausadosPorReputacion\": 6}",
                         MediaType.APPLICATION_JSON));
         servidor.expect(requestTo(BASE + "/api/v1/reputation/estadisticas" + CONSULTA))
                 .andRespond(withSuccess("""
                         {"totalResenas": 500, "calificacionPromedio": 4.6, "resenasReportadas": 7,
                          "reportesPendientes": 5, "reportesResueltos": 2}""", MediaType.APPLICATION_JSON));
-        servidor.expect(requestTo(BASE + "/api/users/usuarios/estadisticas" + CONSULTA))
+        servidor.expect(requestTo(BASE + "/api/v1/users/stats/accounts?from=2000-01-01&to=2026-10-10"))
                 .andExpect(header("Authorization", "Bearer token-admin"))
                 .andRespond(withSuccess("""
-                        {"cuentasActivas": 1480, "cuentasInactivas": 236,
-                         "activosPorDia": [{"etiqueta": "2026-10-04", "cantidad": 600}]}""", MediaType.APPLICATION_JSON));
+                        {"registered": {"total": 1716, "trabajador": 500, "contratante": 1300},
+                         "deactivated": {"total": 236, "trabajador": 40, "contratante": 200}}""",
+                        MediaType.APPLICATION_JSON));
 
         EstadisticasServiciosDTO servicios = cliente.estadisticasServicios(SEMANA);
         EstadisticasTrabajadoresDTO trabajadores = cliente.estadisticasTrabajadores();
@@ -82,14 +84,17 @@ class OrquestadorClientTest {
         assertThat(servicios.solicitudesPorFranja()).extracting(ConteoDTO::cantidad).containsExactly(0L, 1000L, 0L, 300L);
         assertThat(trabajadores.pausadosVoluntarios()).isEqualTo(12);
         assertThat(cliente.estadisticasReputacion(SEMANA).reportesPendientes()).isEqualTo(5);
-        assertThat(cliente.estadisticasUsuarios(SEMANA).cuentasInactivas()).isEqualTo(236);
+        EstadisticasUsuariosDTO usuarios = cliente.estadisticasUsuarios(SEMANA);
+        assertThat(usuarios.cuentasActivas()).isEqualTo(1480);
+        assertThat(usuarios.cuentasInactivas()).isEqualTo(236);
+        assertThat(usuarios.activosPorDia()).isEmpty();
         servidor.verify();
     }
 
     @Test
     void erroresORespuestasVaciasSonFallasDeIntegracion() {
         servidor.expect(requestTo(BASE + "/api/v1/services/reports" + CONSULTA_SERVICE)).andRespond(withServerError());
-        servidor.expect(requestTo(BASE + "/api/workers/trabajadores/estadisticas")).andRespond(withSuccess());
+        servidor.expect(requestTo(BASE + "/api/v1/workers/stats")).andRespond(withSuccess());
         assertThatThrownBy(() -> cliente.estadisticasServicios(SEMANA)).isInstanceOf(IntegracionException.class);
         assertThatThrownBy(() -> cliente.estadisticasTrabajadores())
                 .isInstanceOf(IntegracionException.class)

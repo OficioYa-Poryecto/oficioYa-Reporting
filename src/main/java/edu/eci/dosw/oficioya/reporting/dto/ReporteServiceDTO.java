@@ -16,15 +16,20 @@ import java.util.Map;
  *                       DELETED)
  * @param byNeighborhood solicitudes por barrio (nombre)
  * @param byHour         solicitudes por hora del día (0 a 23)
- * @param completedByDay servicios completados por día ({@code etiqueta} = fecha ISO, {@code cantidad})
+ * @param completedByDay   servicios completados por día ({@code etiqueta} = fecha ISO, {@code cantidad})
+ * @param completedByTrade servicios completados por oficio (nombre del catálogo de Worker)
+ * @param requestsByTrade  solicitudes del periodo por oficio
+ *
+ * Service no maneja tarifas: la tarifa es del trabajador (Worker), así que aquí no llega.
  */
 public record ReporteServiceDTO(long total, Map<String, Long> byStatus, Map<String, Long> byNeighborhood,
-                                Map<Integer, Long> byHour, List<ConteoDTO> completedByDay) {
+                                Map<Integer, Long> byHour, List<ConteoDTO> completedByDay,
+                                List<ConteoDTO> completedByTrade, List<ConteoDTO> requestsByTrade) {
 
-    /** Respuesta de Service sin los completados por día (versión anterior del contrato). */
+    /** Respuesta de Service sin los datos por día ni por oficio (versión anterior del contrato). */
     public ReporteServiceDTO(long total, Map<String, Long> byStatus, Map<String, Long> byNeighborhood,
                              Map<Integer, Long> byHour) {
-        this(total, byStatus, byNeighborhood, byHour, null);
+        this(total, byStatus, byNeighborhood, byHour, null, null, null);
     }
 
     private static final Map<String, String> ESTADOS = Map.of(
@@ -44,11 +49,16 @@ public record ReporteServiceDTO(long total, Map<String, Long> byStatus, Map<Stri
         if (byNeighborhood != null) {
             byNeighborhood.forEach((barrio, cantidad) -> porZona.add(new ConteoDTO(barrio, cantidad)));
         }
-        List<ConteoDTO> cumplidosPorDia = completedByDay == null ? List.of()
-                : completedByDay.stream().filter(conteo -> conteo != null && conteo.etiqueta() != null)
+        return new EstadisticasServiciosDTO(porEstado, validos(completedByDay), validos(completedByTrade),
+                validos(requestsByTrade), porZona, null, List.of(), porFranja());
+    }
+
+    /** Quita los conteos sin etiqueta (por ejemplo, solicitudes viejas sin oficio) y ordena por etiqueta. */
+    private static List<ConteoDTO> validos(List<ConteoDTO> conteos) {
+        return conteos == null ? List.of()
+                : conteos.stream().filter(conteo -> conteo != null && conteo.etiqueta() != null
+                                && !conteo.etiqueta().isBlank())
                         .sorted(Comparator.comparing(ConteoDTO::etiqueta)).toList();
-        return new EstadisticasServiciosDTO(porEstado, cumplidosPorDia, List.of(), List.of(), porZona, null, List.of(),
-                porFranja());
     }
 
     private List<ConteoDTO> porFranja() {
