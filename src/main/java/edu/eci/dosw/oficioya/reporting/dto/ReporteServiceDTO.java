@@ -1,6 +1,7 @@
 package edu.eci.dosw.oficioya.reporting.dto;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,9 +16,16 @@ import java.util.Map;
  *                       DELETED)
  * @param byNeighborhood solicitudes por barrio (nombre)
  * @param byHour         solicitudes por hora del día (0 a 23)
+ * @param completedByDay servicios completados por día ({@code etiqueta} = fecha ISO, {@code cantidad})
  */
 public record ReporteServiceDTO(long total, Map<String, Long> byStatus, Map<String, Long> byNeighborhood,
-                                Map<Integer, Long> byHour) {
+                                Map<Integer, Long> byHour, List<ConteoDTO> completedByDay) {
+
+    /** Respuesta de Service sin los completados por día (versión anterior del contrato). */
+    public ReporteServiceDTO(long total, Map<String, Long> byStatus, Map<String, Long> byNeighborhood,
+                             Map<Integer, Long> byHour) {
+        this(total, byStatus, byNeighborhood, byHour, null);
+    }
 
     private static final Map<String, String> ESTADOS = Map.of(
             "PENDING", "PENDIENTE", "ACCEPTED", "ACEPTADA", "CONFLICT", "CONFLICTO", "CANCELED", "CANCELADA",
@@ -36,7 +44,10 @@ public record ReporteServiceDTO(long total, Map<String, Long> byStatus, Map<Stri
         if (byNeighborhood != null) {
             byNeighborhood.forEach((barrio, cantidad) -> porZona.add(new ConteoDTO(barrio, cantidad)));
         }
-        return new EstadisticasServiciosDTO(porEstado, List.of(), List.of(), List.of(), porZona, null, List.of(),
+        List<ConteoDTO> cumplidosPorDia = completedByDay == null ? List.of()
+                : completedByDay.stream().filter(conteo -> conteo != null && conteo.etiqueta() != null)
+                        .sorted(Comparator.comparing(ConteoDTO::etiqueta)).toList();
+        return new EstadisticasServiciosDTO(porEstado, cumplidosPorDia, List.of(), List.of(), porZona, null, List.of(),
                 porFranja());
     }
 
