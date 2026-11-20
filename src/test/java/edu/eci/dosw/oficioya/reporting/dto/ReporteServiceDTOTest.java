@@ -2,9 +2,12 @@ package edu.eci.dosw.oficioya.reporting.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class ReporteServiceDTOTest {
 
@@ -26,9 +29,31 @@ class ReporteServiceDTOTest {
     }
 
     @Test
+    void usaLosServiciosCompletadosPorDiaOrdenadosPorFecha() {
+        ReporteServiceDTO reporte = new ReporteServiceDTO(7, Map.of("COMPLETED", 7L), Map.of(), Map.of(),
+                List.of(new ConteoDTO("2026-10-31", 4), new ConteoDTO("2026-10-30", 3)));
+
+        assertThat(reporte.aEstadisticas().cumplidosPorDia()).containsExactly(new ConteoDTO("2026-10-30", 3),
+                new ConteoDTO("2026-10-31", 4));
+    }
+
+    @Test
+    void leeElCampoCompletedByDayDelJsonDeService() throws Exception {
+        String json = """
+                {"total": 3, "byStatus": {"COMPLETED": 3}, "byNeighborhood": {}, "byHour": {"9": 3},
+                 "completedByDay": [{"etiqueta": "2026-10-30", "cantidad": 3}]}
+                """;
+
+        ReporteServiceDTO reporte = JsonMapper.builder().build().readValue(json, ReporteServiceDTO.class);
+
+        assertThat(reporte.aEstadisticas().cumplidosPorDia()).containsExactly(new ConteoDTO("2026-10-30", 3));
+    }
+
+    @Test
     void sinDatosDevuelveListasVaciasYFranjasEnCero() {
         EstadisticasServiciosDTO estadisticas = new ReporteServiceDTO(0, null, null, null).aEstadisticas();
 
+        assertThat(estadisticas.cumplidosPorDia()).isEmpty();
         assertThat(estadisticas.solicitudesPorEstado()).isEmpty();
         assertThat(estadisticas.solicitudesPorZona()).isEmpty();
         assertThat(estadisticas.solicitudesPorFranja()).extracting(ConteoDTO::cantidad).containsOnly(0L);
