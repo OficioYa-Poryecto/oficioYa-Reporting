@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import edu.eci.dosw.oficioya.reporting.domain.PeriodoConsulta;
+import edu.eci.dosw.oficioya.reporting.dto.CuentasUsersDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasReputacionDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasServiciosDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasTrabajadoresDTO;
@@ -17,8 +18,8 @@ import edu.eci.dosw.oficioya.reporting.dto.ReporteServiceDTO;
 import edu.eci.dosw.oficioya.reporting.exception.IntegracionException;
 
 /**
- * Implementación REST de {@link OrquestadorClient}. Las rutas son configurables
- * (SUPUESTO: pendientes de confirmar con Squad 1 y con los squads de Service, Worker e Identity / Usuarios).
+ * Implementación REST de {@link OrquestadorClient}. Las rutas son configurables. Service, Users y Reputation están
+ * confirmadas por Squad 1; la de Worker es la sugerida por Squad 1 y Worker aún no la implementa.
  */
 @Component
 @Profile("!demo")
@@ -75,7 +76,22 @@ public class OrquestadorRestClient implements OrquestadorClient {
 
     @Override
     public EstadisticasUsuariosDTO estadisticasUsuarios(PeriodoConsulta periodo) {
-        return consultar(rutaUsuarios, periodo, EstadisticasUsuariosDTO.class, "Identity / Usuarios");
+        // Formato real de Users (RF-12): from/to en AAAA-MM-DD; se traduce con CuentasUsersDTO.
+        try {
+            CuentasUsersDTO cuentas = restClient.get()
+                    .uri(uri -> uri.path(rutaUsuarios)
+                            .queryParam("from", CuentasUsersDTO.DESDE_EL_INICIO)
+                            .queryParam("to", periodo.hasta())
+                            .build())
+                    .retrieve()
+                    .body(CuentasUsersDTO.class);
+            if (cuentas == null) {
+                throw new IntegracionException("Users no devolvió datos", null);
+            }
+            return cuentas.aEstadisticas();
+        } catch (RestClientException e) {
+            throw new IntegracionException("No fue posible consultar las estadísticas de Users", e);
+        }
     }
 
     private <T> T consultar(String ruta, PeriodoConsulta periodo, Class<T> tipo, String dominio) {

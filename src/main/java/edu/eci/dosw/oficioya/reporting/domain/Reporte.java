@@ -8,11 +8,18 @@ import java.util.List;
  * y lo que se exporta salen del mismo objeto, por eso son consistentes (RNF-06).
  */
 public record Reporte(TipoReporte tipo, PeriodoConsulta periodo, LocalDateTime generadoEn,
-                      List<Indicador> indicadores, List<Estadistica> estadisticas) {
+                      List<Indicador> indicadores, List<Estadistica> estadisticas, List<String> fuentesSinDatos) {
 
     public Reporte {
         indicadores = List.copyOf(indicadores);
         estadisticas = List.copyOf(estadisticas);
+        fuentesSinDatos = fuentesSinDatos == null ? List.of() : List.copyOf(fuentesSinDatos);
+    }
+
+    /** Reporte con todos los dominios disponibles. */
+    public Reporte(TipoReporte tipo, PeriodoConsulta periodo, LocalDateTime generadoEn,
+                   List<Indicador> indicadores, List<Estadistica> estadisticas) {
+        this(tipo, periodo, generadoEn, indicadores, estadisticas, List.of());
     }
 
     public String titulo() {

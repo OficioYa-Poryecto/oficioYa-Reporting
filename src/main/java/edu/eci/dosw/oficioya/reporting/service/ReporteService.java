@@ -5,8 +5,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -33,17 +36,32 @@ import edu.eci.dosw.oficioya.reporting.dto.EstadisticasReputacionDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasServiciosDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasTrabajadoresDTO;
 import edu.eci.dosw.oficioya.reporting.dto.EstadisticasUsuariosDTO;
+import edu.eci.dosw.oficioya.reporting.exception.IntegracionException;
 import edu.eci.dosw.oficioya.reporting.service.exportacion.ExportadorReporte;
 import edu.eci.dosw.oficioya.reporting.service.exportacion.ExportadorFactory;
 
 /**
  * Casos de uso de Reporting: catálogo de reportes, generación, indicadores, estadísticas y exportación.
  * No guarda nada: cada consulta pide los datos agregados a los otros dominios a través del Orchestrator.
+ * Si un dominio no responde, el reporte sale con los demás y lo indica en {@link Reporte#fuentesSinDatos()}.
  */
 @Service
 public class ReporteService {
 
     private static final Logger log = LoggerFactory.getLogger(ReporteService.class);
+
+    static final String FUENTE_SERVICE = "Service";
+    static final String FUENTE_WORKER = "Worker";
+    static final String FUENTE_REPUTATION = "Reputation";
+    static final String FUENTE_USERS = "Users";
+    private static final int FUENTES = 4;
+
+    private static final EstadisticasServiciosDTO SERVICIOS_SIN_DATOS =
+            new EstadisticasServiciosDTO(Map.of(), List.of(), List.of());
+    private static final EstadisticasTrabajadoresDTO TRABAJADORES_SIN_DATOS =
+            new EstadisticasTrabajadoresDTO(0, 0, 0, List.of());
+    private static final EstadisticasReputacionDTO REPUTACION_SIN_DATOS = new EstadisticasReputacionDTO(0, 0, 0, 0, 0);
+    private static final EstadisticasUsuariosDTO USUARIOS_SIN_DATOS = new EstadisticasUsuariosDTO(0, 0, List.of());
 
     private final OrquestadorClient orquestador;
     private final Map<TipoIndicador, CalculadorIndicador> calculadores = new EnumMap<>(TipoIndicador.class);
@@ -93,7 +111,9 @@ public class ReporteService {
 
     /** RF-03: todas las estadísticas agregadas del periodo. */
     public List<Estadistica> estadisticas(PeriodoConsulta periodo, String administrador) {
-        DatosPlataforma datos = datos(periodo, orquestador.estadisticasTrabajadores());
+        Set<String> sinDatos = new LinkedHashSet<>();
+        DatosPlataforma datos = datos(periodo, trabajadores(sinDatos), sinDatos);
+        verificarQueAlgunDominioRespondio(sinDatos);
         List<Estadistica> estadisticas = Arrays.stream(TipoEstadistica.values()).map(datos::estadistica).toList();
         log.info("Estadísticas consultadas: periodo={}..{} administrador={}", periodo.desde(), periodo.hasta(),
                 administrador);
@@ -116,21 +136,53 @@ public class ReporteService {
     }
 
     private Reporte construir(TipoReporte tipo, PeriodoConsulta periodo) {
-        EstadisticasTrabajadoresDTO trabajadores = orquestador.estadisticasTrabajadores();
-        DatosPlataforma actual = datos(periodo, trabajadores);
-        DatosPlataforma anterior = datos(periodo.periodoAnterior(), trabajadores);
+        Set<String> sinDatos = new LinkedHashSet<>();
+        EstadisticasTrabajadoresDTO trabajadores = trabajadores(sinDatos);
+        DatosPlataforma actual = datos(periodo, trabajadores, sinDatos);
+        DatosPlataforma anterior = datos(periodo.periodoAnterior(), trabajadores, sinDatos);
+        verificarQueAlgunDominioRespondio(sinDatos);
         List<Indicador> indicadores = tipo.indicadores().stream()
                 .map(t -> calculadores.get(t).calcular(actual, anterior))
                 .toList();
         List<Estadistica> estadisticas = tipo.estadisticas().stream().map(actual::estadistica).toList();
-        return new Reporte(tipo, periodo, LocalDateTime.now(reloj), indicadores, estadisticas);
+        return new Reporte(tipo, periodo, LocalDateTime.now(reloj), indicadores, estadisticas, List.copyOf(sinDatos));
     }
 
-    /** Une lo que entregan Service, Worker, Reputation e Identity / Usuarios en los datos del periodo. */
-    private DatosPlataforma datos(PeriodoConsulta periodo, EstadisticasTrabajadoresDTO trabajadores) {
-        EstadisticasServiciosDTO servicios = orquestador.estadisticasServicios(periodo);
-        EstadisticasReputacionDTO reputacion = orquestador.estadisticasReputacion(periodo);
-        EstadisticasUsuariosDTO usuarios = orquestador.estadisticasUsuarios(periodo);
+    private EstadisticasTrabajadoresDTO trabajadores(Set<String> sinDatos) {
+        return consultar(orquestador::estadisticasTrabajadores, TRABAJADORES_SIN_DATOS, FUENTE_WORKER, sinDatos);
+    }
+
+    /**
+     * Pide los datos a un dominio. Si no responde, se sigue con datos vacíos y se anota el dominio: así el panel
+     * muestra lo que sí está disponible en vez de fallar completo.
+     */
+    private static <T> T consultar(Supplier<T> consulta, T vacio, String fuente, Set<String> sinDatos) {
+        try {
+            return consulta.get();
+        } catch (IntegracionException e) {
+            if (sinDatos.add(fuente)) {
+                log.warn("Reporte sin datos de {}: {}", fuente, e.getMessage());
+            }
+            return vacio;
+        }
+    }
+
+    /** Si ningún dominio respondió no hay nada que mostrar: se informa como falla de integración. */
+    private static void verificarQueAlgunDominioRespondio(Set<String> sinDatos) {
+        if (sinDatos.size() == FUENTES) {
+            throw new IntegracionException("Ningún dominio respondió a través del Orchestrator", null);
+        }
+    }
+
+    /** Une lo que entregan Service, Worker, Reputation y Users en los datos del periodo. */
+    private DatosPlataforma datos(PeriodoConsulta periodo, EstadisticasTrabajadoresDTO trabajadores,
+                                  Set<String> sinDatos) {
+        EstadisticasServiciosDTO servicios = consultar(() -> orquestador.estadisticasServicios(periodo),
+                SERVICIOS_SIN_DATOS, FUENTE_SERVICE, sinDatos);
+        EstadisticasReputacionDTO reputacion = consultar(() -> orquestador.estadisticasReputacion(periodo),
+                REPUTACION_SIN_DATOS, FUENTE_REPUTATION, sinDatos);
+        EstadisticasUsuariosDTO usuarios = consultar(() -> orquestador.estadisticasUsuarios(periodo),
+                USUARIOS_SIN_DATOS, FUENTE_USERS, sinDatos);
         return new DatosPlataforma(periodo,
                 servicios.solicitudesPorEstado() == null ? Map.of() : servicios.solicitudesPorEstado(),
                 porDia(periodo, servicios.cumplidosPorDia()),

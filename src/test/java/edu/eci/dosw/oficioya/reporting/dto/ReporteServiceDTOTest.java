@@ -29,24 +29,37 @@ class ReporteServiceDTOTest {
     }
 
     @Test
-    void usaLosServiciosCompletadosPorDiaOrdenadosPorFecha() {
+    void usaLosServiciosCompletadosPorDiaOrdenadosPorFechaYLosConteosPorOficio() {
         ReporteServiceDTO reporte = new ReporteServiceDTO(7, Map.of("COMPLETED", 7L), Map.of(), Map.of(),
-                List.of(new ConteoDTO("2026-10-31", 4), new ConteoDTO("2026-10-30", 3)));
+                List.of(new ConteoDTO("2026-10-31", 4), new ConteoDTO("2026-10-30", 3)),
+                List.of(new ConteoDTO("Plomería", 5), new ConteoDTO(null, 2)),
+                List.of(new ConteoDTO("Plomería", 6), new ConteoDTO(" ", 1), new ConteoDTO("Electricidad", 2)));
 
-        assertThat(reporte.aEstadisticas().cumplidosPorDia()).containsExactly(new ConteoDTO("2026-10-30", 3),
+        EstadisticasServiciosDTO estadisticas = reporte.aEstadisticas();
+
+        assertThat(estadisticas.cumplidosPorDia()).containsExactly(new ConteoDTO("2026-10-30", 3),
                 new ConteoDTO("2026-10-31", 4));
+        // Las solicitudes sin oficio (creadas antes de que Service lo guardara) no se cuentan por oficio.
+        assertThat(estadisticas.cumplidosPorOficio()).containsExactly(new ConteoDTO("Plomería", 5));
+        assertThat(estadisticas.solicitudesPorOficio()).containsExactly(new ConteoDTO("Electricidad", 2),
+                new ConteoDTO("Plomería", 6));
+        assertThat(estadisticas.tarifaPromedio()).isNull();
     }
 
     @Test
-    void leeElCampoCompletedByDayDelJsonDeService() throws Exception {
+    void leeLosCamposNuevosDelJsonDeService() throws Exception {
         String json = """
                 {"total": 3, "byStatus": {"COMPLETED": 3}, "byNeighborhood": {}, "byHour": {"9": 3},
-                 "completedByDay": [{"etiqueta": "2026-10-30", "cantidad": 3}]}
+                 "completedByDay": [{"etiqueta": "2026-10-30", "cantidad": 3}],
+                 "completedByTrade": [{"etiqueta": "Plomería", "cantidad": 3}],
+                 "requestsByTrade": [{"etiqueta": "Plomería", "cantidad": 4}]}
                 """;
 
         ReporteServiceDTO reporte = JsonMapper.builder().build().readValue(json, ReporteServiceDTO.class);
 
         assertThat(reporte.aEstadisticas().cumplidosPorDia()).containsExactly(new ConteoDTO("2026-10-30", 3));
+        assertThat(reporte.aEstadisticas().cumplidosPorOficio()).containsExactly(new ConteoDTO("Plomería", 3));
+        assertThat(reporte.aEstadisticas().solicitudesPorOficio()).containsExactly(new ConteoDTO("Plomería", 4));
     }
 
     @Test
